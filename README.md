@@ -6,4 +6,4 @@
 
 https://dns.echs.top/dns-query
 
-hosts: [FCM Hosts Next](https://github.com/Mice-Tailor-Infra/fcm-hosts-next)、[GitHub520](https://github.com/521xueweihan/GitHub520)
+hosts: [FCM Hosts Next](https://github.com/Mice-Tailor-Infra/fcm-hosts-next)
