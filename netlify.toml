@@ -13,3 +13,11 @@
   to = "/.netlify/functions/dns-query"
   status = 200
   force = true
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    # 跨域
+    Access-Control-Allow-Origin = "*"
+    Access-Control-Allow-Methods = "GET, POST, OPTIONS"
+    Access-Control-Allow-Headers = "*"
