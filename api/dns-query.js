@@ -5,7 +5,7 @@ const dnsPacket = require('dns-packet');
 let hostsMap = new Map();
 let isLoaded = false;
 
-// 加载 hosts 文件的逻辑（保持不变）
+// 重新设计的读取逻辑：支持一个域名绑定多个 IP（双栈支持）
 function loadHosts() {
     if (isLoaded) return;
     try {
@@ -19,8 +19,23 @@ function loadHosts() {
             const parts = cleanLine.split(/\s+/);
             if (parts.length >= 2) {
                 const ip = parts[0];
+                const isIPv6 = ip.includes(':');
+                
                 for (let i = 1; i < parts.length; i++) {
-                    hostsMap.set(parts[i].toLowerCase(), ip); 
+                    const domain = parts[i].toLowerCase();
+                    
+                    // 如果字典里没有这个域名，先初始化一个空对象
+                    if (!hostsMap.has(domain)) {
+                        hostsMap.set(domain, { A: [], AAAA: [] });
+                    }
+                    
+                    // 将 IP 放入对应的数组中，并去重
+                    const record = hostsMap.get(domain);
+                    if (isIPv6) {
+                        if (!record.AAAA.includes(ip)) record.AAAA.push(ip);
+                    } else {
+                        if (!record.A.includes(ip)) record.A.push(ip);
+                    }
                 }
             }
         });
@@ -30,7 +45,6 @@ function loadHosts() {
     }
 }
 
-// 【关键配置】禁用 Vercel 默认的 body 解析器，这样我们可以直接读取客户端发来的 POST 二进制流
 module.exports.config = {
     api: {
         bodyParser: false,
@@ -38,7 +52,6 @@ module.exports.config = {
 };
 
 module.exports = async (req, res) => {
-    // 允许跨域，并设置标准 DoH 的 Content-Type
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Content-Type', 'application/dns-message');
 
@@ -47,20 +60,13 @@ module.exports = async (req, res) => {
     let dnsBuffer;
 
     try {
-        // 1. 获取客户端发来的 DNS 二进制数据
         if (req.method === 'GET') {
-            // 标准 DoH GET 请求会将包进行 Base64Url 编码并放在 dns 参数中
             const dnsQuery = req.query.dns;
-            if (!dnsQuery) {
-                return res.status(400).send('Bad Request: Missing dns parameter');
-            }
-            // Base64Url 解码
+            if (!dnsQuery) return res.status(400).send('Bad Request: Missing dns parameter');
             const base64 = dnsQuery.replace(/-/g, '+').replace(/_/g, '/');
             const padding = '='.repeat((4 - base64.length % 4) % 4);
             dnsBuffer = Buffer.from(base64 + padding, 'base64');
-            
         } else if (req.method === 'POST') {
-            // 标准 DoH POST 请求直接发送二进制数据体
             dnsBuffer = await new Promise((resolve, reject) => {
                 const chunks = [];
                 req.on('data', chunk => chunks.push(chunk));
@@ -71,18 +77,15 @@ module.exports = async (req, res) => {
             return res.status(405).send('Method Not Allowed');
         }
 
-        // 2. 解析 DNS 查询包
         const packet = dnsPacket.decode(dnsBuffer);
         const question = packet.questions[0];
 
-        if (!question) {
-            return res.status(400).send('Bad Request: No question found');
-        }
+        if (!question) return res.status(400).send('Bad Request: No question found');
 
         const searchName = question.name.toLowerCase();
-        const ip = hostsMap.get(searchName);
+        // 获取该域名下的所有记录（包含 A 和 AAAA 数组）
+        const record = hostsMap.get(searchName);
 
-        // 3. 构造 DNS 响应包
         const responsePacket = {
             type: 'response',
             id: packet.id,
@@ -90,30 +93,27 @@ module.exports = async (req, res) => {
             answers: []
         };
 
-        if (ip) {
-            // 命中 hosts.txt：判断是 IPv4(A) 还是 IPv6(AAAA)
-            const isIPv6 = ip.includes(':');
-            const recordType = isIPv6 ? 'AAAA' : 'A';
+        if (record) {
+            // 命中记录：状态码 NOERROR (0)
+            responsePacket.flags = 0x8180; 
             
-            // 客户端请求什么类型，我们就看看是不是匹配
-            if (question.type === recordType || question.type === 'ANY') {
-                responsePacket.answers.push({
-                    type: recordType,
-                    class: 'IN',
-                    name: question.name,
-                    ttl: 600, // 缓存时间，单位：秒
-                    data: ip
+            // 如果客户端请求 A 记录或 ANY 记录，且我们有 IPv4 数据，则全部返回
+            if (question.type === 'A' || question.type === 'ANY') {
+                record.A.forEach(ip => {
+                    responsePacket.answers.push({ type: 'A', class: 'IN', name: question.name, ttl: 600, data: ip });
                 });
             }
-            // 0x8180 = 标准响应 + 递归期望 + 递归可用 + 状态码 NOERROR (0)
-            responsePacket.flags = 0x8180; 
+            // 如果客户端请求 AAAA 记录或 ANY 记录，且我们有 IPv6 数据，则全部返回
+            if (question.type === 'AAAA' || question.type === 'ANY') {
+                record.AAAA.forEach(ip => {
+                    responsePacket.answers.push({ type: 'AAAA', class: 'IN', name: question.name, ttl: 600, data: ip });
+                });
+            }
         } else {
-            // 没有命中 hosts.txt，直接返回 NXDOMAIN (域名不存在)
-            // 0x8183 = 标准响应 + 递归期望 + 递归可用 + 状态码 NXDOMAIN (3)
+            // 未命中，返回 NXDOMAIN (3)
             responsePacket.flags = 0x8183;
         }
 
-        // 4. 将响应包重新编码为二进制并发送回客户端
         const responseBuffer = dnsPacket.encode(responsePacket);
         res.status(200).send(responseBuffer);
 
