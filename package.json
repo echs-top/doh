@@ -1,0 +1,7 @@
+{
+  "name": "my-doh-server",
+  "version": "1.0.0",
+  "dependencies": {
+    "dns-packet": "^5.6.1"
+  }
+}
