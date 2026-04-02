@@ -24,7 +24,7 @@ jobs:
           echo "开始下载并处理 hosts 数据源..."
           
           URL1="https://raw.githubusercontent.com/Mice-Tailor-Infra/fcm-hosts-next/refs/heads/main/fcm_dual.hosts"
-          URL2="https://raw.githubusercontent.com/521xueweihan/GitHub520/refs/heads/main/hosts"
+          # URL2="https://raw.githubusercontent.com/521xueweihan/GitHub520/refs/heads/main/hosts"
           
           # 核心命令解析：
           # 1. curl -sL: 静默下载这两个链接的内容并自动拼接
@@ -32,7 +32,7 @@ jobs:
           # 3. awk 'NF': NF 代表 Number of Fields（字段数量）。这一步会自动过滤掉所有完全空白或只包含空格的无意义行
           # 4. > hosts.txt: 将最终处理干净的数据覆写保存到你项目根目录的 hosts.txt 中
           
-          curl -sL "$URL1" "$URL2" | sed 's/#.*//' | awk 'NF' > hosts.txt
+          curl -sL "$URL1" | sed 's/#.*//' | awk 'NF' > hosts.txt
           
           echo "处理完成！现在的有效记录总数："
           wc -l hosts.txt
