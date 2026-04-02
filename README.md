@@ -1,6 +1,6 @@
 # doh-hosts
 
-部署在vercel/netlify，只支持查询hosts中有的域名(自动更新)
+部署在vercel/netlify，只支持查询hosts中有的域名(action自动更新)
 
 https://dns.echs.top/dns-query
 
