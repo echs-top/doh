@@ -1,4 +1,4 @@
-# doh
+# doh-hosts
 
 只支持查询hosts中有的结果
 
