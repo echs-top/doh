@@ -1,5 +1,7 @@
 # doh-hosts
 
+部署在vercel/netlify
+
 https://dns.echs.top/dns-query
 
 只支持查询hosts中有的结果
