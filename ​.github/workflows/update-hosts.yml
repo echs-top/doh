@@ -1,0 +1,56 @@
+name: Auto Update Hosts
+
+# 触发条件配置
+on:
+  schedule:
+    # 每天 UTC 时间 0 点（北京时间早上 8 点）自动执行一次
+    - cron: '0 20 * * *'
+  workflow_dispatch: # 允许你在 GitHub 网页上手动点击运行按钮
+
+jobs:
+  update-and-push:
+    runs-on: ubuntu-latest
+    
+    # 赋予 GITHUB_TOKEN 推送代码的权限
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Fetch, Merge, and Clean Hosts
+        run: |
+          echo "开始下载并处理 hosts 数据源..."
+          
+          URL1="https://raw.githubusercontent.com/Mice-Tailor-Infra/fcm-hosts-next/refs/heads/main/fcm_dual.hosts"
+          URL2="https://raw.githubusercontent.com/521xueweihan/GitHub520/refs/heads/main/hosts"
+          
+          # 核心命令解析：
+          # 1. curl -sL: 静默下载这两个链接的内容并自动拼接
+          # 2. sed 's/#.*//': 找到所有带 # 的内容及其后面的字符，全部替换为空（即删除注释）
+          # 3. awk 'NF': NF 代表 Number of Fields（字段数量）。这一步会自动过滤掉所有完全空白或只包含空格的无意义行
+          # 4. > hosts.txt: 将最终处理干净的数据覆写保存到你项目根目录的 hosts.txt 中
+          
+          curl -sL "$URL1" "$URL2" | sed 's/#.*//' | awk 'NF' > hosts.txt
+          
+          echo "处理完成！现在的有效记录总数："
+          wc -l hosts.txt
+
+      - name: Commit and Push Changes
+        run: |
+          # 配置自动化机器人的 Git 信息
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # 检查文件是否有发生实际的变化
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "检测到 hosts.txt 有更新，正在提交..."
+            git add hosts.txt
+            # 提交信息中加入当前的时间戳
+            git commit -m "Auto-update hosts.txt $(date +'%Y-%m-%d %H:%M:%S')"
+            git push
+            echo "提交并推送到 GitHub 成功！"
+          else
+            echo "上游数据源无变化，跳过本次提交。"
+          fi
