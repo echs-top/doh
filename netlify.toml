@@ -1,0 +1,15 @@
+[build]
+  # 告诉 Netlify，我们的函数现在直接放在 "netlify" 文件夹下
+  functions = "netlify"
+
+[functions]
+  # 打包时带上 hosts.txt
+  included_files = ["hosts.txt"]
+
+[[redirects]]
+  from = "/dns-query"
+  # 【极其重要】：这里千万不要改！
+  # 无论你把源文件放在哪个文件夹，Netlify 在服务器内部编译后，都会统一把它挂载到 "/.netlify/functions/" 路径下。
+  to = "/.netlify/functions/dns-query"
+  status = 200
+  force = true
