@@ -7,3 +7,5 @@
 https://dns.echs.top/dns-query
 
 hosts: [FCM Hosts Next](https://github.com/Mice-Tailor-Infra/fcm-hosts-next)
+
+关于版权：不滥用此项目盈利即可随意使用，最终解释权归gemini所有
