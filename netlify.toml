@@ -19,5 +19,5 @@
   [headers.values]
     # 跨域
     Access-Control-Allow-Origin = "*"
-    Access-Control-Allow-Methods = "GET, POST, OPTIONS"
+    Access-Control-Allow-Methods = "*"
     Access-Control-Allow-Headers = "*"
