@@ -24,8 +24,10 @@ jobs:
       - name: Fetch, Merge, and Clean Hosts
         run: |
           echo "开始下载并处理 hosts 数据源..."
-          URL1="https://raw.githubusercontent.com/Mice-Tailor-Infra/fcm-hosts-next/refs/heads/main/fcm_dual.hosts"
-          
+          # URL1="https://raw.githubusercontent.com/Mice-Tailor-Infra/fcm-hosts-next/refs/heads/main/fcm_dual.hosts"
+          URL1="https://raw.githubusercontent.com/yanpuzhen/fcm-hosts/refs/heads/main/hosts.txt"
+         
+         
           # 下载、去注释、去空行
           curl -sL "$URL1" | sed 's/#.*//' | awk 'NF' > hosts.txt
           
