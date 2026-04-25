@@ -1,0 +1,111 @@
+name: Auto Update FCM DNS
+
+on:
+  schedule:
+    # 每天北京时间 12:00 (UTC 04:00) 运行
+    - cron: '0 4 * * *'
+  workflow_dispatch: # 允许手动在网页触发
+
+jobs:
+  update-dns:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: 检出仓库代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Node.js 环境
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 解析并过滤 DNS 节点
+        run: |
+          cat << 'EOF' > run_dns.js
+          const fs = require('fs');
+          const path = require('path');
+
+          const DOH_URL = "https://dns.google/resolve";
+          const DOMAINS = [
+              "mtalk.google.com", "mtalk4.google.com", "mtalk-dev.google.com", "mtalk-staging.google.com",
+              "alt1-mtalk.google.com", "alt2-mtalk.google.com", "alt3-mtalk.google.com", "alt4-mtalk.google.com",
+              "alt5-mtalk.google.com", "alt6-mtalk.google.com", "alt7-mtalk.google.com", "alt8-mtalk.google.com"
+          ];
+          const ALLOWED_COUNTRIES = ["US", "TW"];
+
+          async function main() {
+              let domainIpMap = {};
+              let allIpsToFilter = new Set();
+
+              console.log("开始请求 DoH...");
+              for (const d of DOMAINS) {
+                  domainIpMap[d] = { v4: new Set(), v6: new Set() };
+                  try {
+                      const res4 = await (await fetch(`${DOH_URL}?name=${d}&type=1`)).json();
+                      if (res4.Answer) {
+                          res4.Answer.forEach(a => {
+                              if (a.type === 1) { domainIpMap[d].v4.add(a.data); allIpsToFilter.add(a.data); }
+                          });
+                      }
+                      const res6 = await (await fetch(`${DOH_URL}?name=${d}&type=28`)).json();
+                      if (res6.Answer) {
+                          res6.Answer.forEach(a => {
+                              if (a.type === 28) { domainIpMap[d].v6.add(a.data); allIpsToFilter.add(a.data); }
+                          });
+                      }
+                  } catch (e) {
+                      console.error(`解析 ${d} 失败:`, e.message);
+                  }
+              }
+
+              console.log(`共获取到 ${allIpsToFilter.size} 个独立 IP，开始查属地...`);
+              let validIps = new Set();
+              let ipArray = Array.from(allIpsToFilter);
+              
+              for (let i = 0; i < ipArray.length; i += 100) {
+                  let batch = ipArray.slice(i, i + 100);
+                  try {
+                      let geoRes = await (await fetch("http://ip-api.com/batch?fields=query,countryCode", {
+                          method: "POST",
+                          body: JSON.stringify(batch)
+                      })).json();
+                      
+                      geoRes.forEach(info => {
+                          if (ALLOWED_COUNTRIES.includes(info.countryCode)) {
+                              validIps.add(info.query);
+                          }
+                      });
+                  } catch (e) {
+                      console.error("GeoIP API 失败:", e.message);
+                  }
+              }
+
+              console.log(`过滤后剩余 ${validIps.size} 个合规 IP。正在生成文件...`);
+              let resultLines = [];
+              for (const d of DOMAINS) {
+                  let v4List = Array.from(domainIpMap[d].v4).filter(ip => validIps.has(ip));
+                  let v6List = Array.from(domainIpMap[d].v6).filter(ip => validIps.has(ip));
+                  
+                  if (v4List.length > 0 || v6List.length > 0) {
+                      resultLines.push(`${d} ${v4List.join(' ')} ${v6List.join(' ')}`.trim().replace(/\s+/g, ' '));
+                  }
+              }
+
+              const outPath = path.join(process.cwd(), 'data', 'fcm_dns');
+              fs.mkdirSync(path.dirname(outPath), { recursive: true });
+              fs.writeFileSync(outPath, resultLines.join('\n') + '\n');
+              console.log("写入成功: data/fcm_dns");
+          }
+
+          main();
+          EOF
+          node run_dns.js
+
+      - name: 提交并推送到仓库
+        run: |
+          git config --local user.name "github-actions[bot]"
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/fcm_dns
+          git commit -m "Auto sync FCM DNS from Google DoH" || echo "No changes to commit"
+          git push
