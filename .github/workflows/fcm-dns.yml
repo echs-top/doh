@@ -19,7 +19,7 @@ jobs:
         with:
           node-version: '20'
 
-      - name: 利用 ECS 穷举解析并过滤 DNS 节点
+      - name: 利用双栈 ECS 穷举解析并过滤 DNS 节点
         run: |
           cat << 'EOF' > run_dns.js
           const fs = require('fs');
@@ -33,11 +33,18 @@ jobs:
           ];
           const ALLOWED_COUNTRIES = ["US", "TW"];
 
-          // 伪造来自不同地区的客户端子网，骗取更多该地区的 Google 节点
-          const ECS_SUBNETS = [
-              "168.95.1.0/24", "1.160.0.0/24", "210.65.0.0/24", "114.32.0.0/24", // 台湾子网
-              "8.8.8.0/24", "104.16.0.0/24", "199.116.0.0/24", "68.183.0.0/24", "24.0.0.0/24", "76.233.0.0/24", // 美国子网
-              "0.0.0.0/0" // 默认不指定
+          // IPv4 伪造子网
+          const ECS_SUBNETS_V4 = [
+              "168.95.1.0/24", "1.160.0.0/24", "210.65.0.0/24", "114.32.0.0/24", // TW
+              "8.8.8.0/24", "104.16.0.0/24", "199.116.0.0/24", "68.183.0.0/24", "24.0.0.0/24", "76.233.0.0/24", // US
+              "0.0.0.0/0"
+          ];
+
+          // IPv6 伪造子网 (包含台湾和美国的主流 ISP 前缀)
+          const ECS_SUBNETS_V6 = [
+              "2001:b000::/32", "2404:0::/32", "2001:288::/32", // TW
+              "2001:4860::/32", "2600::/32", "2601::/32", "2607:f8b0::/32", // US
+              "::/0"
           ];
 
           async function main() {
@@ -48,19 +55,26 @@ jobs:
               for (const d of DOMAINS) {
                   domainIpMap[d] = { v4: new Set(), v6: new Set() };
                   
-                  // 对每个域名，遍历所有地区网段进行解析
-                  for (const subnet of ECS_SUBNETS) {
+                  // 1. 请求 IPv4 记录 (type=1)
+                  for (const subnet of ECS_SUBNETS_V4) {
                       try {
-                          let ecsParam = subnet === "0.0.0.0/0" ? "" : `&edns_client_subnet=${subnet}`;
-                          
-                          // IPv4
+                          let ecsParam = subnet === "0.0.0.0/0" ? "" : `&edns_client_subnet=${encodeURIComponent(subnet)}`;
                           const res4 = await (await fetch(`${DOH_URL}?name=${d}&type=1${ecsParam}`)).json();
                           if (res4.Answer) {
                               res4.Answer.forEach(a => {
                                   if (a.type === 1) { domainIpMap[d].v4.add(a.data); allIpsToFilter.add(a.data); }
                               });
                           }
-                          // IPv6
+                      } catch (e) {
+                          console.error(`IPv4 解析 ${d} (${subnet}) 失败:`, e.message);
+                      }
+                  }
+
+                  // 2. 请求 IPv6 记录 (type=28)
+                  for (const subnet of ECS_SUBNETS_V6) {
+                      try {
+                          // IPv6 地址的冒号必须 encodeURIComponent 编码，否则 URL 报错
+                          let ecsParam = subnet === "::/0" ? "" : `&edns_client_subnet=${encodeURIComponent(subnet)}`;
                           const res6 = await (await fetch(`${DOH_URL}?name=${d}&type=28${ecsParam}`)).json();
                           if (res6.Answer) {
                               res6.Answer.forEach(a => {
@@ -68,12 +82,12 @@ jobs:
                               });
                           }
                       } catch (e) {
-                          console.error(`解析 ${d} (${subnet}) 失败:`, e.message);
+                          console.error(`IPv6 解析 ${d} (${subnet}) 失败:`, e.message);
                       }
                   }
               }
 
-              console.log(`穷举完毕，共获取到 ${allIpsToFilter.size} 个独立 IP，开始查属地...`);
+              console.log(`穷举完毕，共获取到 ${allIpsToFilter.size} 个独立 IP，开始批量查属地...`);
               let validIps = new Set();
               let ipArray = Array.from(allIpsToFilter);
               
