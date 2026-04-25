@@ -2,9 +2,8 @@ name: Auto Update FCM DNS
 
 on:
   schedule:
-    # 每天北京时间 12:00 (UTC 04:00) 运行
     - cron: '0 4 * * *'
-  workflow_dispatch: # 允许手动在网页触发
+  workflow_dispatch:
 
 jobs:
   update-dns:
@@ -20,7 +19,7 @@ jobs:
         with:
           node-version: '20'
 
-      - name: 解析并过滤 DNS 节点
+      - name: 利用 ECS 穷举解析并过滤 DNS 节点
         run: |
           cat << 'EOF' > run_dns.js
           const fs = require('fs');
@@ -34,32 +33,47 @@ jobs:
           ];
           const ALLOWED_COUNTRIES = ["US", "TW"];
 
+          // 伪造来自不同地区的客户端子网，骗取更多该地区的 Google 节点
+          const ECS_SUBNETS = [
+              "168.95.1.0/24", "1.160.0.0/24", "210.65.0.0/24", "114.32.0.0/24", // 台湾子网
+              "8.8.8.0/24", "104.16.0.0/24", "199.116.0.0/24", "68.183.0.0/24", "24.0.0.0/24", "76.233.0.0/24", // 美国子网
+              "0.0.0.0/0" // 默认不指定
+          ];
+
           async function main() {
               let domainIpMap = {};
               let allIpsToFilter = new Set();
 
-              console.log("开始请求 DoH...");
+              console.log("开始利用 ECS 穷举请求 DoH...");
               for (const d of DOMAINS) {
                   domainIpMap[d] = { v4: new Set(), v6: new Set() };
-                  try {
-                      const res4 = await (await fetch(`${DOH_URL}?name=${d}&type=1`)).json();
-                      if (res4.Answer) {
-                          res4.Answer.forEach(a => {
-                              if (a.type === 1) { domainIpMap[d].v4.add(a.data); allIpsToFilter.add(a.data); }
-                          });
+                  
+                  // 对每个域名，遍历所有地区网段进行解析
+                  for (const subnet of ECS_SUBNETS) {
+                      try {
+                          let ecsParam = subnet === "0.0.0.0/0" ? "" : `&edns_client_subnet=${subnet}`;
+                          
+                          // IPv4
+                          const res4 = await (await fetch(`${DOH_URL}?name=${d}&type=1${ecsParam}`)).json();
+                          if (res4.Answer) {
+                              res4.Answer.forEach(a => {
+                                  if (a.type === 1) { domainIpMap[d].v4.add(a.data); allIpsToFilter.add(a.data); }
+                              });
+                          }
+                          // IPv6
+                          const res6 = await (await fetch(`${DOH_URL}?name=${d}&type=28${ecsParam}`)).json();
+                          if (res6.Answer) {
+                              res6.Answer.forEach(a => {
+                                  if (a.type === 28) { domainIpMap[d].v6.add(a.data); allIpsToFilter.add(a.data); }
+                              });
+                          }
+                      } catch (e) {
+                          console.error(`解析 ${d} (${subnet}) 失败:`, e.message);
                       }
-                      const res6 = await (await fetch(`${DOH_URL}?name=${d}&type=28`)).json();
-                      if (res6.Answer) {
-                          res6.Answer.forEach(a => {
-                              if (a.type === 28) { domainIpMap[d].v6.add(a.data); allIpsToFilter.add(a.data); }
-                          });
-                      }
-                  } catch (e) {
-                      console.error(`解析 ${d} 失败:`, e.message);
                   }
               }
 
-              console.log(`共获取到 ${allIpsToFilter.size} 个独立 IP，开始查属地...`);
+              console.log(`穷举完毕，共获取到 ${allIpsToFilter.size} 个独立 IP，开始查属地...`);
               let validIps = new Set();
               let ipArray = Array.from(allIpsToFilter);
               
