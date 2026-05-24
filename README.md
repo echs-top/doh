@@ -6,4 +6,6 @@
 
 https://dns.echs.top/dns-query
 
+目前处于半废弃状态，因为没有好的hosts上游
+
 hosts: [FCM Hosts Next](https://github.com/Mice-Tailor-Infra/fcm-hosts-next)
